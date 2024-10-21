@@ -158,28 +158,24 @@ function App() {
 
   useEffect(() => {
     const handleResize = () => {
-      if (containerRef.current) {
-        const containerWidth = containerRef.current.clientWidth;
-        const containerHeight = containerRef.current.clientHeight;
-        const aspectRatio = 4 / 3; // 800:600
-
-        let newWidth, newHeight;
-        if (containerWidth / containerHeight > aspectRatio) {
-          newHeight = containerHeight;
-          newWidth = newHeight * aspectRatio;
-        } else {
-          newWidth = containerWidth;
-          newHeight = newWidth / aspectRatio;
-        }
-
-        setCanvasSize({ width: newWidth, height: newHeight });
+      if (canvasRef.current && containerRef.current) {
+        const { width, height } = containerRef.current.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvasRef.current.width = width * dpr;
+        canvasRef.current.height = height * dpr;
+        canvasRef.current.style.width = `${width}px`;
+        canvasRef.current.style.height = `${height}px`;
+        const ctx = canvasRef.current.getContext('2d');
+        ctx.scale(dpr, dpr);
+        drawComponents(ctx);
       }
     };
 
-    handleResize();
     window.addEventListener('resize', handleResize);
+    handleResize();
+
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [components, connectionStart, mousePosition]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -218,11 +214,12 @@ function App() {
   };
 
   const handleCanvasClick = (event) => {
+    event.preventDefault();
     if (draggingComponent) {
       return;
     }
 
-    const { x, y } = getCanvasCoordinates(event);
+    const { x, y } = getCanvasCoordinates(event.touches ? event.touches[0] : event);
 
     // Check if clicked on a component
     const clickedComponent = components.find(component =>
@@ -348,12 +345,11 @@ function App() {
 
   const getCanvasCoordinates = (event) => {
     const rect = canvasRef.current.getBoundingClientRect();
-    const scaleX = 800 / rect.width;
-    const scaleY = 600 / rect.height;
-    return {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY
-    };
+    const scaleX = canvasRef.current.width / rect.width;
+    const scaleY = canvasRef.current.height / rect.height;
+    const x = (event.clientX - rect.left) * scaleX;
+    const y = (event.clientY - rect.top) * scaleY;
+    return { x, y };
   };
 
   const handleCanvasDoubleClick = (event) => {
@@ -372,7 +368,8 @@ function App() {
   };
 
   const handleCanvasMouseDown = (event) => {
-    const { x, y } = getCanvasCoordinates(event);
+    event.preventDefault();
+    const { x, y } = getCanvasCoordinates(event.touches ? event.touches[0] : event);
 
     const clickedComponent = components.find(component =>
       x >= component.x && x <= component.x + component.width &&
@@ -389,7 +386,8 @@ function App() {
   };
 
   const handleCanvasMouseMove = (event) => {
-    const { x, y } = getCanvasCoordinates(event);
+    event.preventDefault();
+    const { x, y } = getCanvasCoordinates(event.touches ? event.touches[0] : event);
     setMousePosition({ x, y });
 
     if (draggingComponent) {
@@ -401,7 +399,8 @@ function App() {
     }
   };
 
-  const handleCanvasMouseUp = () => {
+  const handleCanvasMouseUp = (event) => {
+    event.preventDefault();
     setDraggingComponent(null);
   };
 
@@ -486,16 +485,16 @@ function App() {
         <div className="canvas-container" ref={containerRef}>
           <canvas
             ref={canvasRef}
-            width={800}
-            height={600}
-            onClick={handleCanvasClick}
-            onDoubleClick={handleCanvasDoubleClick}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
-            onMouseLeave={handleCanvasMouseUp}  // Add this line
-            onContextMenu={handleCanvasContextMenu}
-            style={{ width: '100%', height: '100%', border: '1px solid black', cursor: 'crosshair' }}
+            onMouseLeave={handleCanvasMouseUp}
+            onTouchStart={handleCanvasMouseDown}
+            onTouchMove={handleCanvasMouseMove}
+            onTouchEnd={handleCanvasMouseUp}
+            onClick={handleCanvasClick}
+            onContextMenu={(e) => e.preventDefault()}
+            style={{ border: '1px solid black', touchAction: 'none' }}
           />
         </div>
         <div className="truth-tables-container">
