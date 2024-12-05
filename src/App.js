@@ -160,13 +160,11 @@ function App() {
     const handleResize = () => {
       if (canvasRef.current && containerRef.current) {
         const { width, height } = containerRef.current.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        canvasRef.current.width = width * dpr;
-        canvasRef.current.height = height * dpr;
+        canvasRef.current.width = width;
+        canvasRef.current.height = height;
         canvasRef.current.style.width = `${width}px`;
         canvasRef.current.style.height = `${height}px`;
         const ctx = canvasRef.current.getContext('2d');
-        ctx.scale(dpr, dpr);
         drawComponents(ctx);
       }
     };
@@ -220,6 +218,11 @@ function App() {
     }
 
     const { x, y } = getCanvasCoordinates(event.touches ? event.touches[0] : event);
+
+    // First, check if clicked on a wire
+    if (deleteWire(x, y)) {
+      return;
+    }
 
     // Check if clicked on a component
     const clickedComponent = components.find(component =>
@@ -345,11 +348,10 @@ function App() {
 
   const getCanvasCoordinates = (event) => {
     const rect = canvasRef.current.getBoundingClientRect();
-    const scaleX = canvasRef.current.width / rect.width;
-    const scaleY = canvasRef.current.height / rect.height;
-    const x = (event.clientX - rect.left) * scaleX;
-    const y = (event.clientY - rect.top) * scaleY;
-    return { x, y };
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
   };
 
   const handleCanvasDoubleClick = (event) => {
@@ -409,41 +411,45 @@ function App() {
   };
 
   const simulateCircuit = () => {
+    const getComponentState = (componentId) => {
+      const component = components.find(c => c.id === componentId);
+      if (!component) return 0;
+      return simulateComponent(component);
+    };
+
     const simulateComponent = (component) => {
       if (component.type === 'INPUT') {
         return component.state ? 1 : 0;
       }
 
       if (component.type === 'OUTPUT') {
-        return component.inputs.length > 0 ? simulateComponent(components.find(c => c.id === component.inputs[0])) : 0;
+        return component.inputs[0] ? getComponentState(component.inputs[0]) : 0;
       }
 
-      const inputStates = component.inputs.map(inputId => {
-        const inputComponent = components.find(c => c.id === inputId);
-        return inputComponent ? simulateComponent(inputComponent) : 0;
-      });
+      const inputStates = component.inputs.map(inputId => 
+        inputId ? getComponentState(inputId) : 0
+      );
 
-      const truthTable = TRUTH_TABLES[component.type];
-      if (!truthTable) {
-        console.error(`No truth table found for gate type: ${component.type}`);
+      // Handle incomplete connections
+      if (component.type !== 'NOT' && inputStates.length < 2) {
         return 0;
       }
 
-      const result = truthTable.find(row => 
+      const truthTable = TRUTH_TABLES[component.type];
+      if (!truthTable) return 0;
+
+      const matchingRow = truthTable.find(row => 
         row.inputs.length === inputStates.length &&
         row.inputs.every((input, index) => input === inputStates[index])
       );
 
-      return result ? result.output : 0;
+      return matchingRow ? matchingRow.output : 0;
     };
 
-    setComponents(components.map(component => {
-      if (component.type !== 'INPUT') {
-        const newState = simulateComponent(component) === 1;
-        return { ...component, state: newState };
-      }
-      return component;
-    }));
+    setComponents(prevComponents => prevComponents.map(component => ({
+      ...component,
+      state: component.type === 'INPUT' ? component.state : simulateComponent(component) === 1
+    })));
   };
 
   const saveCircuit = () => {
@@ -471,6 +477,44 @@ function App() {
     setShowInstructions(!showInstructions);
   };
 
+  const deleteWire = (x, y) => {
+    let wireDeleted = false;
+    
+    setComponents(prevComponents => {
+      return prevComponents.map(component => {
+        const updatedComponent = { ...component };
+        
+        // Check each output connection
+        component.outputs.forEach(outputId => {
+          const outputComponent = prevComponents.find(c => c.id === outputId);
+          if (outputComponent) {
+            const startX = component.x + component.width;
+            const startY = component.y + component.height / 2;
+            const endX = outputComponent.x;
+            const endY = outputComponent.y + outputComponent.height / 2;
+            
+            if (isPointNearLine(x, y, startX, startY, endX, endY)) {
+              // Remove the connection
+              updatedComponent.outputs = updatedComponent.outputs.filter(id => id !== outputId);
+              wireDeleted = true;
+            }
+          }
+        });
+        
+        // Also remove any input connections
+        if (wireDeleted) {
+          updatedComponent.inputs = updatedComponent.inputs.map(input => 
+            input === component.id ? null : input
+          );
+        }
+        
+        return updatedComponent;
+      });
+    });
+    
+    return wireDeleted;
+  };
+
   return (
     <div className="App">
       <h1>Logic Gate Designer</h1>
@@ -493,6 +537,7 @@ function App() {
             onTouchMove={handleCanvasMouseMove}
             onTouchEnd={handleCanvasMouseUp}
             onClick={handleCanvasClick}
+            onDoubleClick={handleCanvasDoubleClick}
             onContextMenu={(e) => e.preventDefault()}
             style={{ border: '1px solid black', touchAction: 'none' }}
           />
